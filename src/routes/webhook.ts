@@ -145,7 +145,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
         .run(latest.id, latest.text, latest.author, latest.url, reply);
 
       const pendingId = result.lastInsertRowid as number;
-      const msg = formatApprovalMessage(latest.author, latest.text, reply, pendingId, latest.createdAt);
+      const msg = formatApprovalMessage(latest.author, latest.text, reply, pendingId, latest.createdAt, latest.url);
       await sendWhatsApp(msg);
     } catch (err) {
       console.error('[Fetch] Failed:', err);
@@ -180,15 +180,15 @@ router.post('/webhook', async (req: Request, res: Response) => {
   if (lower.startsWith('regen')) {
     const regenIdMatch = body.match(/#(\d+)/);
     const instructions = body.replace(/^regen\s*/i, '').replace(/#\d+\s*/, '').trim() || undefined;
-    let regenRow: { id: number; tweet_text: string; tweet_author: string } | undefined;
+    let regenRow: { id: number; tweet_text: string; tweet_author: string; tweet_url: string } | undefined;
 
     if (regenIdMatch) {
       regenRow = db
-        .prepare('SELECT id, tweet_text, tweet_author FROM pending_replies WHERE id = ? AND status = ?')
+        .prepare('SELECT id, tweet_text, tweet_author, tweet_url FROM pending_replies WHERE id = ? AND status = ?')
         .get(parseInt(regenIdMatch[1], 10), 'pending') as typeof regenRow;
     } else {
       regenRow = db
-        .prepare('SELECT id, tweet_text, tweet_author FROM pending_replies WHERE status = ? ORDER BY created_at DESC LIMIT 1')
+        .prepare('SELECT id, tweet_text, tweet_author, tweet_url FROM pending_replies WHERE status = ? ORDER BY created_at DESC LIMIT 1')
         .get('pending') as typeof regenRow;
     }
 
@@ -200,7 +200,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
     try {
       const newReply = await generateReply(regenRow.tweet_text, regenRow.tweet_author, instructions);
       db.prepare('UPDATE pending_replies SET generated_reply = ? WHERE id = ?').run(newReply, regenRow.id);
-      const msg = formatApprovalMessage(regenRow.tweet_author, regenRow.tweet_text, newReply, regenRow.id);
+      const msg = formatApprovalMessage(regenRow.tweet_author, regenRow.tweet_text, newReply, regenRow.id, undefined, regenRow.tweet_url);
       await sendWhatsApp(`🔄 Regenerated reply:\n\n${msg}`);
     } catch (err) {
       console.error('[Regen] Failed:', err);

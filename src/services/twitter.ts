@@ -110,7 +110,7 @@ export async function fetchUserTweets(
 export async function postReply(
   tweetId: string,
   replyText: string
-): Promise<boolean> {
+): Promise<string | null> {
   const url = 'https://api.x.com/2/tweets';
   const body = {
     text: replyText,
@@ -133,9 +133,9 @@ export async function postReply(
 
     if (response.data?.data?.id) {
       console.log(`[Twitter] Reply posted to tweet ${tweetId} (new tweet: ${response.data.data.id})`);
-      return true;
+      return response.data.data.id;
     }
-    return false;
+    return null;
   } catch (error: any) {
     const status = error?.response?.status;
     const responseData = error?.response?.data;
@@ -159,7 +159,7 @@ export async function postReply(
       );
     }
 
-    return false;
+    return null;
   }
 }
 

@@ -33,12 +33,14 @@ export function formatApprovalMessage(
   tweetText: string,
   generatedReply: string,
   pendingId: number,
-  createdAt?: string
+  createdAt?: string,
+  tweetUrl?: string
 ): string {
   const postedAgo = createdAt ? ` (${timeAgo(createdAt)})` : '';
   return [
     `🐦 New tweet from @${tweetAuthor}${postedAgo}:`,
     `"${tweetText}"`,
+    tweetUrl ? `🔗 ${tweetUrl}` : '',
     ``,
     `💬 Suggested reply:`,
     `"${generatedReply}"`,
