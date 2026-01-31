@@ -107,6 +107,35 @@ export async function fetchUserTweets(
 /**
  * Post a reply to a tweet via the official X API v2.
  */
+export async function postTweet(text: string): Promise<string | null> {
+  const url = 'https://api.x.com/2/tweets';
+  const body = { text };
+
+  try {
+    const authHeader = oauth.toHeader(
+      oauth.authorize({ url, method: 'POST' }, token)
+    );
+
+    const response = await axios.post(url, body, {
+      headers: {
+        ...authHeader,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.data?.data?.id) {
+      console.log(`[Twitter] Tweet posted: ${response.data.data.id}`);
+      return response.data.data.id;
+    }
+    return null;
+  } catch (error: any) {
+    const status = error?.response?.status;
+    const responseData = error?.response?.data;
+    console.error(`[Twitter] Error posting tweet:`, status || error.message, responseData ? JSON.stringify(responseData) : '');
+    throw error;
+  }
+}
+
 export async function postReply(
   tweetId: string,
   replyText: string
