@@ -35,6 +35,26 @@ function initTables() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       resolved_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS bip_config (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS bip_posts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      day_number INTEGER NOT NULL,
+      answers TEXT NOT NULL,
+      generated_post TEXT NOT NULL,
+      final_post TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      posted_at TEXT
+    );
+
+    INSERT OR IGNORE INTO bip_config (key, value) VALUES ('day_number', '186');
+    INSERT OR IGNORE INTO bip_config (key, value) VALUES ('product_desc', 'helping students learn better');
+    INSERT OR IGNORE INTO bip_config (key, value) VALUES ('account', 'penseum_');
   `);
 }
 

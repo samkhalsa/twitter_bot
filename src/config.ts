@@ -24,9 +24,13 @@ export const config = {
     apiKey: required('ANTHROPIC_API_KEY'),
   },
   telegram: {
-    botToken: required('TELEGRAM_BOT_TOKEN'),
-    chatId: required('TELEGRAM_CHAT_ID'),
+    botToken: process.env.TELEGRAM_BOT_TOKEN || '',
+    chatId: process.env.TELEGRAM_CHAT_ID || '',
   },
   port: parseInt(process.env.PORT || '3000', 10),
   pollIntervalMinutes: parseInt(process.env.POLL_INTERVAL_MINUTES || '60', 10),
+  bip: {
+    telegramBotToken: process.env.BIP_TELEGRAM_BOT_TOKEN || '',
+    telegramChatId: process.env.BIP_TELEGRAM_CHAT_ID || '',
+  },
 };

@@ -2,7 +2,15 @@ import axios from 'axios';
 import crypto from 'crypto';
 import OAuth from 'oauth-1.0a';
 import { config } from '../config';
-import { sendTelegram } from './telegram';
+// Lazy import to avoid circular dependency when used by BIP bot
+let _sendTelegram: ((msg: string) => Promise<boolean>) | null = null;
+async function sendTelegram(msg: string): Promise<boolean> {
+  if (!_sendTelegram) {
+    const mod = await import('./telegram');
+    _sendTelegram = mod.sendTelegram;
+  }
+  return _sendTelegram(msg);
+}
 
 export interface Tweet {
   id: string;
@@ -159,6 +167,41 @@ export async function postReply(
       );
     }
 
+    return null;
+  }
+}
+
+/**
+ * Post a standalone tweet (not a reply) via the official X API v2.
+ */
+export async function postTweet(text: string): Promise<string | null> {
+  const url = 'https://api.x.com/2/tweets';
+  const body = { text };
+
+  try {
+    const authHeader = oauth.toHeader(
+      oauth.authorize({ url, method: 'POST' }, token)
+    );
+
+    const response = await axios.post(url, body, {
+      headers: {
+        ...authHeader,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (response.data?.data?.id) {
+      console.log(`[Twitter] Tweet posted: ${response.data.data.id}`);
+      return response.data.data.id;
+    }
+    return null;
+  } catch (error: any) {
+    const status = error?.response?.status;
+    console.error(
+      `[Twitter] Error posting tweet:`,
+      status || error.message,
+      error?.response?.data ? JSON.stringify(error.response.data) : ''
+    );
     return null;
   }
 }
