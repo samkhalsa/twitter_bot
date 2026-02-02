@@ -38,19 +38,38 @@ export function formatApprovalMessage(
   tweetUrl?: string
 ): string {
   const postedAgo = createdAt ? ` (${timeAgo(createdAt)})` : '';
+
+  // Try to parse as JSON (new 3-option format), fall back to single reply
+  let repliesBlock: string;
+  try {
+    const replies = JSON.parse(generatedReply);
+    repliesBlock = [
+      `💬 Option A (thoughtful):`,
+      `"${replies.a}"`,
+      ``,
+      `💬 Option B (controversial):`,
+      `"${replies.b}"`,
+      ``,
+      `💬 Option C (comparison):`,
+      `"${replies.c}"`,
+    ].join('\n');
+  } catch {
+    repliesBlock = `💬 Suggested reply:\n"${generatedReply}"`;
+  }
+
   return [
     `🐦 New tweet from @${tweetAuthor}${postedAgo}:`,
     `"${tweetText}"`,
     tweetUrl ? `🔗 ${tweetUrl}` : '',
     ``,
-    `💬 Suggested reply:`,
-    `"${generatedReply}"`,
+    repliesBlock,
     ``,
     `[ID: ${pendingId}]`,
     `Reply with:`,
-    `• 1 — Approve & post`,
+    `• 1a / 1b / 1c — Approve option A, B, or C`,
+    `• 1 — Approve option A (default)`,
     `• 2 — Reject`,
-    `• Or send your edited reply text`,
+    `• #${pendingId} your text — Post custom reply`,
   ].join('\n');
 }
 
@@ -222,7 +241,7 @@ export function setupBotCommands() {
           `INSERT OR IGNORE INTO pending_replies (tweet_id, tweet_text, tweet_author, tweet_url, generated_reply, status)
            VALUES (?, ?, ?, ?, ?, 'pending')`
         )
-        .run(latest.id, latest.text, latest.author, latest.url, reply);
+        .run(latest.id, latest.text, latest.author, latest.url, JSON.stringify(reply));
 
       if (result.changes === 0) {
         await sendTelegram(`Already have a pending reply for this tweet.`);
@@ -230,7 +249,7 @@ export function setupBotCommands() {
       }
 
       const pendingId = result.lastInsertRowid as number;
-      const approvalMsg = formatApprovalMessage(latest.author, latest.text, reply, pendingId, latest.createdAt, latest.url);
+      const approvalMsg = formatApprovalMessage(latest.author, latest.text, JSON.stringify(reply), pendingId, latest.createdAt, latest.url);
       await sendTelegram(approvalMsg);
     } catch (err) {
       console.error('[Fetch] Failed:', err);
@@ -268,15 +287,15 @@ export function setupBotCommands() {
     const args = (match![1] || '').trim();
     const regenIdMatch = args.match(/#?(\d+)/);
     const instructions = args.replace(/#?\d+\s*/, '').trim() || undefined;
-    let regenRow: { id: number; tweet_text: string; tweet_author: string; tweet_url: string } | undefined;
+    let regenRow: { id: number; tweet_text: string; tweet_author: string; tweet_url: string; generated_reply: string } | undefined;
 
     if (regenIdMatch) {
       regenRow = db
-        .prepare('SELECT id, tweet_text, tweet_author, tweet_url FROM pending_replies WHERE id = ? AND status = ?')
+        .prepare('SELECT id, tweet_text, tweet_author, tweet_url, generated_reply FROM pending_replies WHERE id = ? AND status = ?')
         .get(parseInt(regenIdMatch[1], 10), 'pending') as typeof regenRow;
     } else {
       regenRow = db
-        .prepare('SELECT id, tweet_text, tweet_author, tweet_url FROM pending_replies WHERE status = ? ORDER BY created_at DESC LIMIT 1')
+        .prepare('SELECT id, tweet_text, tweet_author, tweet_url, generated_reply FROM pending_replies WHERE status = ? ORDER BY created_at DESC LIMIT 1')
         .get('pending') as typeof regenRow;
     }
 
@@ -286,9 +305,11 @@ export function setupBotCommands() {
     }
 
     try {
-      const newReply = await generateReply(regenRow.tweet_text, regenRow.tweet_author, instructions);
-      db.prepare('UPDATE pending_replies SET generated_reply = ? WHERE id = ?').run(newReply, regenRow.id);
-      const approvalMsg = formatApprovalMessage(regenRow.tweet_author, regenRow.tweet_text, newReply, regenRow.id, undefined, regenRow.tweet_url);
+      let previousReplies: import('./ai').GeneratedReplies | undefined;
+      try { previousReplies = JSON.parse(regenRow.generated_reply); } catch {}
+      const newReply = await generateReply(regenRow.tweet_text, regenRow.tweet_author, instructions, previousReplies);
+      db.prepare('UPDATE pending_replies SET generated_reply = ? WHERE id = ?').run(JSON.stringify(newReply), regenRow.id);
+      const approvalMsg = formatApprovalMessage(regenRow.tweet_author, regenRow.tweet_text, JSON.stringify(newReply), regenRow.id, undefined, regenRow.tweet_url);
       await sendTelegram(`🔄 Regenerated reply:\n\n${approvalMsg}`);
     } catch (err) {
       console.error('[Regen] Failed:', err);
@@ -303,8 +324,8 @@ export function setupBotCommands() {
     const text = (msg.text || '').trim();
     if (!text || text.startsWith('/')) return; // skip commands
 
-    // Match: "1", "2", "1 #5", "2 #5"
-    const approveMatch = text.match(/^([12])(?:\s+#(\d+))?\s*$/);
+    // Match: "1", "1a", "1b", "1c", "2", "1a #5", "2 #5", etc.
+    const approveMatch = text.match(/^([12])([abc])?(?:\s+#(\d+))?\s*$/i);
     // Match: "#5 custom reply text"
     const editMatch = text.match(/^#(\d+)\s+(.+)$/s);
 
@@ -317,7 +338,8 @@ export function setupBotCommands() {
 
     if (approveMatch) {
       const action = approveMatch[1]; // "1" or "2"
-      const targetId = approveMatch[2] ? parseInt(approveMatch[2], 10) : null;
+      const option = (approveMatch[2] || 'a').toLowerCase() as 'a' | 'b' | 'c'; // default to 'a'
+      const targetId = approveMatch[3] ? parseInt(approveMatch[3], 10) : null;
 
       if (targetId) {
         pending = db
@@ -344,13 +366,22 @@ export function setupBotCommands() {
       }
 
       if (action === '1') {
-        const newTweetId = await postReply(pending.tweet_id, pending.generated_reply);
+        // Resolve which reply text to post
+        let replyText = pending.generated_reply;
+        try {
+          const replies = JSON.parse(pending.generated_reply);
+          replyText = replies[option] || replies.a;
+        } catch {
+          // legacy single-string format, use as-is
+        }
+
+        const newTweetId = await postReply(pending.tweet_id, replyText);
         if (newTweetId) {
           db.prepare(
             `UPDATE pending_replies SET status = 'posted', final_reply = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?`
-          ).run(pending.generated_reply, pending.id);
+          ).run(replyText, pending.id);
           const tweetLink = `https://x.com/i/status/${newTweetId}`;
-          await sendTelegram(`✅ Reply posted to @${pending.tweet_author}! [#${pending.id}]\n🔗 ${tweetLink}`);
+          await sendTelegram(`✅ Reply posted (option ${option.toUpperCase()}) to @${pending.tweet_author}! [#${pending.id}]\n🔗 ${tweetLink}`);
         } else {
           await sendTelegram(`❌ Failed to post reply [#${pending.id}]. Try again later.`);
         }

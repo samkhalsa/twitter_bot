@@ -49,10 +49,11 @@ async function pollAccounts() {
       if (existing) continue;
 
       // Generate AI reply
-      let reply = '';
+      let replyJson = '';
       let status = 'new';
       try {
-        reply = await generateReply(tweet.text, tweet.author);
+        const replies = await generateReply(tweet.text, tweet.author);
+        replyJson = JSON.stringify(replies);
         status = 'pending'; // ready for Telegram approval
         console.log(`[AI] Generated reply for tweet ${tweet.id}`);
       } catch (err) {
@@ -62,7 +63,7 @@ async function pollAccounts() {
       const insertResult = db.prepare(
         `INSERT OR IGNORE INTO pending_replies (tweet_id, tweet_text, tweet_author, tweet_url, generated_reply, status)
          VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(tweet.id, tweet.text, tweet.author, tweet.url, reply, status);
+      ).run(tweet.id, tweet.text, tweet.author, tweet.url, replyJson, status);
 
       if (insertResult.changes === 0) continue;
 
@@ -73,7 +74,7 @@ async function pollAccounts() {
         const row = db
           .prepare('SELECT id FROM pending_replies WHERE tweet_id = ?')
           .get(tweet.id) as { id: number };
-        const msg = formatApprovalMessage(tweet.author, tweet.text, reply, row.id, tweet.createdAt, tweet.url);
+        const msg = formatApprovalMessage(tweet.author, tweet.text, replyJson, row.id, tweet.createdAt, tweet.url);
         await sendTelegram(msg);
       }
     }

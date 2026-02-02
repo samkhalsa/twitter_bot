@@ -136,16 +136,17 @@ router.post('/webhook', async (req: Request, res: Response) => {
       }
 
       const reply = await generateReply(latest.text, latest.author);
+      const replyJson = JSON.stringify(reply);
 
       const result = db
         .prepare(
           `INSERT INTO pending_replies (tweet_id, tweet_text, tweet_author, tweet_url, generated_reply, status)
            VALUES (?, ?, ?, ?, ?, 'pending')`
         )
-        .run(latest.id, latest.text, latest.author, latest.url, reply);
+        .run(latest.id, latest.text, latest.author, latest.url, replyJson);
 
       const pendingId = result.lastInsertRowid as number;
-      const msg = formatApprovalMessage(latest.author, latest.text, reply, pendingId, latest.createdAt, latest.url);
+      const msg = formatApprovalMessage(latest.author, latest.text, replyJson, pendingId, latest.createdAt, latest.url);
       await sendWhatsApp(msg);
     } catch (err) {
       console.error('[Fetch] Failed:', err);
@@ -180,15 +181,15 @@ router.post('/webhook', async (req: Request, res: Response) => {
   if (lower.startsWith('regen')) {
     const regenIdMatch = body.match(/#(\d+)/);
     const instructions = body.replace(/^regen\s*/i, '').replace(/#\d+\s*/, '').trim() || undefined;
-    let regenRow: { id: number; tweet_text: string; tweet_author: string; tweet_url: string } | undefined;
+    let regenRow: { id: number; tweet_text: string; tweet_author: string; tweet_url: string; generated_reply: string } | undefined;
 
     if (regenIdMatch) {
       regenRow = db
-        .prepare('SELECT id, tweet_text, tweet_author, tweet_url FROM pending_replies WHERE id = ? AND status = ?')
+        .prepare('SELECT id, tweet_text, tweet_author, tweet_url, generated_reply FROM pending_replies WHERE id = ? AND status = ?')
         .get(parseInt(regenIdMatch[1], 10), 'pending') as typeof regenRow;
     } else {
       regenRow = db
-        .prepare('SELECT id, tweet_text, tweet_author, tweet_url FROM pending_replies WHERE status = ? ORDER BY created_at DESC LIMIT 1')
+        .prepare('SELECT id, tweet_text, tweet_author, tweet_url, generated_reply FROM pending_replies WHERE status = ? ORDER BY created_at DESC LIMIT 1')
         .get('pending') as typeof regenRow;
     }
 
@@ -198,9 +199,12 @@ router.post('/webhook', async (req: Request, res: Response) => {
     }
 
     try {
-      const newReply = await generateReply(regenRow.tweet_text, regenRow.tweet_author, instructions);
-      db.prepare('UPDATE pending_replies SET generated_reply = ? WHERE id = ?').run(newReply, regenRow.id);
-      const msg = formatApprovalMessage(regenRow.tweet_author, regenRow.tweet_text, newReply, regenRow.id, undefined, regenRow.tweet_url);
+      let previousReplies: import('../services/ai').GeneratedReplies | undefined;
+      try { previousReplies = JSON.parse(regenRow.generated_reply); } catch {}
+      const newReply = await generateReply(regenRow.tweet_text, regenRow.tweet_author, instructions, previousReplies);
+      const newReplyJson = JSON.stringify(newReply);
+      db.prepare('UPDATE pending_replies SET generated_reply = ? WHERE id = ?').run(newReplyJson, regenRow.id);
+      const msg = formatApprovalMessage(regenRow.tweet_author, regenRow.tweet_text, newReplyJson, regenRow.id, undefined, regenRow.tweet_url);
       await sendWhatsApp(`🔄 Regenerated reply:\n\n${msg}`);
     } catch (err) {
       console.error('[Regen] Failed:', err);
@@ -251,12 +255,22 @@ router.post('/webhook', async (req: Request, res: Response) => {
   // Strip the #ID part to get the actual command
   const command = body.replace(/#\d+/, '').trim();
 
-  if (command === '1') {
-    const success = await postReply(pending.tweet_id, pending.generated_reply);
+  const optionMatch = command.match(/^1([abc])?$/i);
+  if (optionMatch) {
+    const option = (optionMatch[1] || 'a').toLowerCase() as 'a' | 'b' | 'c';
+    let replyText = pending.generated_reply;
+    try {
+      const replies = JSON.parse(pending.generated_reply);
+      replyText = replies[option] || replies.a;
+    } catch {
+      // legacy single-string format
+    }
+
+    const success = await postReply(pending.tweet_id, replyText);
     if (success) {
       db.prepare(
         `UPDATE pending_replies SET status = 'posted', final_reply = ?, resolved_at = CURRENT_TIMESTAMP WHERE id = ?`
-      ).run(pending.generated_reply, pending.id);
+      ).run(replyText, pending.id);
       await sendWhatsApp(`✅ Reply posted to @${pending.tweet_author}! [#${pending.id}]`);
     } else {
       await sendWhatsApp(`❌ Failed to post reply [#${pending.id}]. Try again later.`);
