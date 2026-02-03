@@ -21,4 +21,4 @@ COPY --from=builder /app ./
 VOLUME /app/data
 ENV DB_PATH=/app/data/bot.db
 
-CMD ["npx", "tsx", "src/index.ts"]
+CMD ["npx", "tsx", "src/bip-bot.ts"]
