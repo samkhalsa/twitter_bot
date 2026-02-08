@@ -3,18 +3,21 @@ import { config } from '../config';
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
-const SYSTEM_PROMPT = `write THREE versions of a short twitter reply. lowercase only. no hashtags, no emojis. sound like a real person, not a brand. keep each under 200 characters. return them in this exact format:
+const SYSTEM_PROMPT = `reply to a tweet. be real, casual, direct. MAX 80 characters each. lowercase only, no hashtags/emojis.
 
-1: [a useful thought — a take, a fact, or a question]
-2: [a SHORT hilarious controversial comment about this situation that can easily start a debate and get attention]
-3: [a SHORT hilarious comparison comment about this situation that can easily start a debate and get attention]
+4 options:
+1: useful (a take or pushback)
+2: contrarian (disagree, call out BS)
+3: witty (sharp one-liner)
+4: question (genuine curiosity)
 
-just return the three numbered replies, nothing else.`;
+4 numbered replies only. keep them SHORT.`;
 
 export interface GeneratedReplies {
-  a: string; // useful thought
-  b: string; // controversial
-  c: string; // comparison
+  a: string; // useful
+  b: string; // contrarian
+  c: string; // witty
+  d: string; // question
 }
 
 export async function generateReply(
@@ -25,11 +28,11 @@ export async function generateReply(
 ): Promise<GeneratedReplies> {
   let prompt: string;
   if (instructions && previousReplies) {
-    prompt = `Tweet by @${tweetAuthor}:\n"${tweetText}"\n\nHere are the current reply options:\n1: ${previousReplies.a}\n2: ${previousReplies.b}\n3: ${previousReplies.c}\n\nRegenerate all three replies with these instructions: ${instructions}`;
+    prompt = `Tweet by @${tweetAuthor}:\n"${tweetText}"\n\nHere are the current reply options:\n1: ${previousReplies.a}\n2: ${previousReplies.b}\n3: ${previousReplies.c}\n4: ${previousReplies.d}\n\nRegenerate all four replies with these instructions: ${instructions}`;
   } else if (instructions) {
     prompt = `Tweet by @${tweetAuthor}:\n"${tweetText}"\n\nWrite replies with these instructions: ${instructions}`;
   } else if (previousReplies) {
-    prompt = `Tweet by @${tweetAuthor}:\n"${tweetText}"\n\nHere are the current reply options:\n1: ${previousReplies.a}\n2: ${previousReplies.b}\n3: ${previousReplies.c}\n\nRegenerate all three with fresh takes:`;
+    prompt = `Tweet by @${tweetAuthor}:\n"${tweetText}"\n\nHere are the current reply options:\n1: ${previousReplies.a}\n2: ${previousReplies.b}\n3: ${previousReplies.c}\n4: ${previousReplies.d}\n\nRegenerate all four with fresh takes:`;
   } else {
     prompt = `Tweet by @${tweetAuthor}:\n"${tweetText}"\n\nWrite replies:`;
   }
@@ -52,16 +55,26 @@ export async function generateReply(
   }
 
   const text = block.text.trim();
+  console.log('[AI] Raw response:', text);
   const lines = text.split('\n').filter((l) => l.trim());
 
-  const extract = (prefix: string) => {
-    const line = lines.find((l) => l.startsWith(prefix));
-    return line ? line.replace(prefix, '').trim() : '';
+  const extract = (num: string) => {
+    // Match variations: "1:", "1.", "1)", or just "1 " at start of line (with optional leading whitespace)
+    const pattern = new RegExp(`^\\s*${num}[:.)]?\\s*(.*)$`, 'i');
+    const line = lines.find((l) => pattern.test(l));
+    if (line) {
+      const match = line.match(pattern);
+      return match ? match[1].trim() : '';
+    }
+    return '';
   };
 
-  return {
-    a: extract('1:'),
-    b: extract('2:'),
-    c: extract('3:'),
+  const result = {
+    a: extract('1'),
+    b: extract('2'),
+    c: extract('3'),
+    d: extract('4'),
   };
+  console.log('[AI] Parsed replies:', result);
+  return result;
 }
