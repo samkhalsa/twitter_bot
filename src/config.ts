@@ -20,8 +20,11 @@ export const config = {
     accessToken: required('TWITTER_ACCESS_TOKEN'),
     accessTokenSecret: required('TWITTER_ACCESS_TOKEN_SECRET'),
   },
-  anthropic: {
-    apiKey: required('ANTHROPIC_API_KEY'),
+  gemini: {
+    apiKey: required('GEMINI_API_KEY'),
+  },
+  xai: {
+    apiKey: required('XAI_API_KEY'),
   },
   telegram: {
     botToken: required('TELEGRAM_BOT_TOKEN'),

@@ -14,13 +14,15 @@
   "type": "commonjs",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.71.2",
+    "@google/genai": "^1.42.0",
     "axios": "^1.13.4",
     "better-sqlite3": "^12.6.2",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
     "node-telegram-bot-api": "^0.67.0",
-    "oauth-1.0a": "^2.2.6"
+    "oauth-1.0a": "^2.2.6",
+    "openai": "^6.22.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
